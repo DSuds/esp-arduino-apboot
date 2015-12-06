@@ -6,7 +6,7 @@
 MDNSResponder mdns;
 WiFiServer server(80);
 
-const char* ssid = "BUBBLES";
+const char* ssid = "HUZZAH";
 String st;
 
 void setup() {
@@ -22,6 +22,8 @@ void setup() {
   for (int i = 0; i < 32; ++i)
     {
       esid += char(EEPROM.read(i));
+      if( esid[i]==0xFF || esid[i]==0 )
+        break;
     }
   Serial.print("SSID: ");
   Serial.println(esid);
@@ -30,6 +32,8 @@ void setup() {
   for (int i = 32; i < 96; ++i)
     {
       epass += char(EEPROM.read(i));
+      if( epass[i-32]==0xFF || epass[i-32]==0 )
+        break;
     }
   Serial.print("PASS: ");
   Serial.println(epass);  
@@ -59,16 +63,18 @@ int testWifi(void) {
 
 void launchWeb(int webtype) {
           Serial.println("");
-          Serial.println("WiFi connected");
-          Serial.println(WiFi.localIP());
-          Serial.println(WiFi.softAPIP());
-          if (!mdns.begin("esp8266", WiFi.localIP())) {
-            Serial.println("Error setting up MDNS responder!");
-            while(1) { 
-              delay(1000);
+          if( webtype==0 ){
+            Serial.println("WiFi connected");
+            Serial.println(WiFi.localIP());
+            if (!mdns.begin("myhuzzah")) {
+              Serial.println("Error setting up MDNS responder!");
+              while(1) { 
+                delay(1000);
+              }
             }
-          }
-          Serial.println("mDNS responder started");
+            Serial.println("mDNS responder started");
+          } else
+            Serial.println(WiFi.softAPIP());
           // Start the server
           server.begin();
           Serial.println("Server started");   
@@ -131,8 +137,9 @@ void setupAP(void) {
 
 int mdns1(int webtype)
 {
-  // Check for any mDNS queries and send responses
-  mdns.update();
+  if( webtype==0 )
+    // Check for any mDNS queries and send responses
+    mdns.update();
   
   // Check if a client has connected
   WiFiClient client = server.available();
@@ -165,28 +172,16 @@ int mdns1(int webtype)
   client.flush(); 
   String s;
   if ( webtype == 1 ) {
-      if (req == "/")
-      {
-        IPAddress ip = WiFi.softAPIP();
-        String ipStr = String(ip[0]) + '.' + String(ip[1]) + '.' + String(ip[2]) + '.' + String(ip[3]);
-        s = "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n\r\n<!DOCTYPE HTML>\r\n<html>Hello from ESP8266 at ";
-        s += ipStr;
-        s += "<p>";
-        s += st;
-        s += "<form method='get' action='a'><label>SSID: </label><input name='ssid' length=32><input name='pass' length=64><input type='submit'></form>";
-        s += "</html>\r\n\r\n";
-        Serial.println("Sending 200");
-      }
-      else if ( req.startsWith("/a?ssid=") ) {
+      if ( req.startsWith("/a?ssid=") ) {
         // /a?ssid=blahhhh&pass=poooo
         Serial.println("clearing eeprom");
         for (int i = 0; i < 96; ++i) { EEPROM.write(i, 0); }
         String qsid; 
-        qsid = req.substring(8,req.indexOf('&'));
+        qsid = urldecode(req.substring(8,req.indexOf('&')));
         Serial.println(qsid);
         Serial.println("");
         String qpass;
-        qpass = req.substring(req.lastIndexOf('=')+1);
+        qpass = urldecode(req.substring(req.lastIndexOf('=')+1));
         Serial.println(qpass);
         Serial.println("");
         
@@ -212,8 +207,15 @@ int mdns1(int webtype)
       }
       else
       {
-        s = "HTTP/1.1 404 Not Found\r\n\r\n";
-        Serial.println("Sending 404");
+        IPAddress ip = WiFi.softAPIP();
+        String ipStr = String(ip[0]) + '.' + String(ip[1]) + '.' + String(ip[2]) + '.' + String(ip[3]);
+        s = "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n\r\n<!DOCTYPE HTML>\r\n<html>Hello from ESP8266 at ";
+        s += ipStr;
+        s += "<p>";
+        s += st;
+        s += "<form method='get' action='a'><label>SSID: </label><input name='ssid' length=32><input name='pass' length=64><input type='submit'></form>";
+        s += "</html>\r\n\r\n";
+        Serial.println("Sending 200");
       }
   } 
   else
@@ -245,7 +247,41 @@ int mdns1(int webtype)
   return(20);
 }
 
-
+// Simple URL decode
+String urldecode(String encoded)
+{
+  char buff[ encoded.length() ];
+  char *out = buff;
+  const char *in = encoded.c_str();
+  char a,b;
+  while( *in ){
+    if ((*in == '%') &&
+      ((a = in[1]) && (b = in[2])) &&
+      (isxdigit(a) && isxdigit(b))) {
+      if (a >= 'a')
+        a += 10 - 'a';
+      else if (a >= 'A')
+        a += 10 - 'A';
+      else
+        a -= '0'; 
+      if (b >= 'a')
+        b += 10 - 'a';
+      else if (b >= 'A')
+        b += 10 - 'A';
+      else
+        b -= '0'; 
+      *out++ = 16*a+b;
+      in+=3;
+    } else if ( *in=='+' ){
+      *out++ = ' ';
+      *in++;    
+    } else {
+      *out++ = *in++;
+    }
+  }
+  *out = '\0';
+  return String(buff);
+}
 
 void loop() {
   // put your main code here, to run repeatedly:
